@@ -16,7 +16,6 @@ if st.button("Berechnung vorbereiten"):
         "maturity_date": maturity_date,
         "nominal": nominal_sold,
         "contract_rate": contract_rate,
-        "spot_rate": spot_rate,
-        "foreign_rate": contract_rate,
+        "spot_rate": spot_rate
     }
     st.success("Daten gespeichert! Zur Berechnung wechseln.")
