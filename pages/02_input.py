@@ -8,7 +8,6 @@ maturity_date = st.date_input("Fälligkeitstermin")
 nominal_sold = st.number_input("Verkaufte Summe (EUR)", min_value=0.0)
 contract_rate = st.number_input("Contract Rate (fixiert)", min_value=0.0)
 spot_rate = st.number_input("Aktueller Spot Rate", min_value=0.0)
-contract_rate = st.number_input("Contract Rate aus Vertrag", min_value=0.0) # Flat-Rate
 
 if st.button("Berechnung vorbereiten"):
     st.session_state.input_data = {
