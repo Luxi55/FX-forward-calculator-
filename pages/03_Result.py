@@ -16,6 +16,7 @@ def discount_factor(rate, maturity_date, valuation_date):
 
 if "input_data" in st.session_state:
     data = st.session_state.input_data
+    trade_direction = data.get("trade_direction", "sell_eur_buy_foreign")
     valuation_date = data["valuation_date"]
     maturity_date = data["maturity_date"]
     dom_rate = get_bundesbank_interest_rate(valuation_date, maturity_date)
@@ -43,10 +44,19 @@ if "input_data" in st.session_state:
     forward_rate = data["spot_rate"] * (np.exp(df_dom * (maturity_date - valuation_date).days / 360) / np.exp(df_for * (maturity_date - valuation_date).days / 360))
     st.metric("Forward Rate", f"{forward_rate:.4f}")
 
-    # Nominalbetrag in Fremdwährungn
-    bought_amount = data["nominal"] * data["contract_rate"]
-    
-    market_value_dom = (bought_amount/forward_rate - bought_amount) /(1 + dom_rate * (maturity_date - valuation_date).days / 360)
+    if trade_direction == "sell_foreign_buy_eur":
+        st.caption("Szenario: Verkauf Fremdwährung gegen EUR")
+        sold_amount_foreign = data["nominal"]
+        market_value_dom = (
+            sold_amount_foreign / data["contract_rate"]
+            - sold_amount_foreign / forward_rate
+        ) / (1 + dom_rate * (maturity_date - valuation_date).days / 360)
+    else:
+        st.caption("Szenario: Verkauf EUR gegen Fremdwährung")
+        # Nominalbetrag in Fremdwährung
+        bought_amount = data["nominal"] * data["contract_rate"]
+        market_value_dom = (bought_amount / forward_rate - bought_amount) / (1 + dom_rate * (maturity_date - valuation_date).days / 360)
+
     st.metric("Marktwert des Forwards (EUR)", f"{market_value_dom:.2f}")
 else:
     st.warning("Bitte zuerst Geschäftsdaten eingeben!")
