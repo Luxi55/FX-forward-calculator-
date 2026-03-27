@@ -2,6 +2,7 @@ import streamlit as st
 import datetime
 
 st.title("Daten Forward eingeben")
+st.subheader("Verkauf €")
 
 # Session State initialisieren
 if "valuation_date" not in st.session_state:
@@ -20,24 +21,20 @@ if "foreign_country_name" not in st.session_state:
 # Widgets mit key-Parameter - Werte werden automatisch gespeichert
 valuation_date = st.date_input(
     "Bewertungsstichtag", 
-    value=st.session_state.valuation_date,
     key="valuation_date"
 )
 maturity_date = st.date_input(
     "Fälligkeitstermin",
-    value=st.session_state.maturity_date,
     key="maturity_date"
 )
 nominal_sold = st.number_input(
     "Verkaufte Summe (EUR)", 
     min_value=0.0, 
-    value=st.session_state.nominal_sold,
     key="nominal_sold"
 )
 contract_rate = st.number_input(
     "Contract Rate (Wechselkurs)", 
     min_value=0.0, 
-    value=st.session_state.contract_rate,
     format="%.4f",
     help="z.B. 1.1200 für EUR/USD",
     key="contract_rate"
@@ -45,29 +42,38 @@ contract_rate = st.number_input(
 spot_rate = st.number_input(
     "Aktueller Spot Rate (Wechselkurs)", 
     min_value=0.0, 
-    value=st.session_state.spot_rate,
     format="%.4f",
     help="z.B. 1.1050 für EUR/USD",
     key="spot_rate"
 )
 
-dataframe_foreign_1 = st.file_uploader(
-    "CSV-Datei mit historischen Zinsdaten hochladen", 
-    type=["csv"],
-    key="dataframe_foreign_1"
-)
-dataframe_foreign_2 = st.file_uploader(
-    "CSV-Datei mit historischen Zinsdaten hochladen", 
-    type=["csv"], 
-    help="Für US Dollar sind je nach Szenario 2 CSV nötig.",
-    key="dataframe_foreign_2"
-)
 foreign_country_name = st.selectbox(
     "Partnerwährung", 
     options=["US Dollar", "Schweizer Franken", "Britisches Pfund"], 
-    index=["US Dollar", "Schweizer Franken", "Britisches Pfund"].index(st.session_state.foreign_country_name),
     key="foreign_country_name"
 )
+
+if st.session_state.foreign_country_name == "US Dollar":
+    dataframe_foreign_1 = st.file_uploader(
+        "CSV-Datei mit historischen Zinsdaten hochladen", 
+        type=["csv"],
+        key="dataframe_foreign_1"
+    )
+    dataframe_foreign_2 = st.file_uploader(
+        "CSV-Datei mit historischen Zinsdaten hochladen", 
+        type=["csv"], 
+        help="Für US Dollar sind je nach Szenario 2 CSV nötig.",
+        key="dataframe_foreign_2"
+    )
+else:
+    dataframe_foreign_1 = None
+    dataframe_foreign_2 = None
+
+if st.session_state.foreign_country_name == "Schweizer Franken":
+    st.info("Zinsstrukturkurve für Schweizer Franken wird automatisch über API bezogen.")
+
+if st.session_state.foreign_country_name == "Britisches Pfund":
+    st.warning("Britisches Pfund ist noch nicht implementiert.")
 
 if st.button("Berechnung vorbereiten", type="primary"):
     st.session_state.input_data = {
@@ -76,8 +82,8 @@ if st.button("Berechnung vorbereiten", type="primary"):
         "nominal": st.session_state.nominal_sold,
         "contract_rate": st.session_state.contract_rate,
         "spot_rate": st.session_state.spot_rate,
-        "dataframe_foreign_1": st.session_state.dataframe_foreign_1,
-        "dataframe_foreign_2": st.session_state.dataframe_foreign_2,
+        "dataframe_foreign_1": dataframe_foreign_1,
+        "dataframe_foreign_2": dataframe_foreign_2,
         "foreign_country_name": st.session_state.foreign_country_name
     }
     st.success("Daten gespeichert! Zu Result wechseln.")

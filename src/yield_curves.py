@@ -5,6 +5,30 @@ from io import BytesIO, StringIO
 import re
 import numpy as np
 
+
+def _latest_curve_snapshot(df, date_col, tenor_col, value_col, valuation_date, source_name):
+    """
+    Take the latest available value per tenor up to valuation_date.
+    Missing values are forward-filled within each tenor.
+    """
+    work = df.copy()
+    work[date_col] = pd.to_datetime(work[date_col], errors="coerce")
+    work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
+    work = work[work[date_col] <= valuation_date]
+
+    if work.empty:
+        raise ValueError(f"No {source_name} yield curve data on or before valuation date {valuation_date}")
+
+    work = work.sort_values([tenor_col, date_col])
+    work[value_col] = work.groupby(tenor_col)[value_col].ffill()
+    latest = work.groupby(tenor_col, as_index=False).tail(1)
+    latest = latest.dropna(subset=[value_col])
+
+    if latest.empty:
+        raise ValueError(f"No valid {source_name} maturity points on or before valuation date {valuation_date}")
+
+    return latest
+
 def maturity_to_days_EUR(s):
     if pd.isna(s):
         return None
@@ -34,6 +58,14 @@ def maturity_to_days_USD(s):
     if years == 0 and months == 0:
         return None
     return int(round(years * 365 + months * 30))
+
+def maturity_to_days_CHF(s):
+    if pd.isna(s):
+        return None
+    years = 0
+    # example 1J 2J 3J ... 10J
+    y = re.search(r'(\d+)\s*J', str(s).strip().upper())
+    return int(y.group(1)) * 365 if y else None
 
 def fetch_eurostat_curve() -> pd.DataFrame:
     """
@@ -73,10 +105,15 @@ def get_bundesbank_interest_rate(valuation_date, maturity_date):
     vdate = pd.to_datetime(valuation_date)
     mdate = pd.to_datetime(maturity_date)
 
-    # Filtere die Daten für den Bewertungsstichtag
-    df_date = df[df['TIME_PERIOD'] == vdate].copy()
-    if df_date.empty:
-        raise ValueError(f"No yield curve data for valuation date {valuation_date}")
+    # Use latest available data up to valuation date (handles weekends/holidays).
+    df_date = _latest_curve_snapshot(
+        df,
+        date_col="TIME_PERIOD",
+        tenor_col="maturity",
+        value_col="OBS_VALUE",
+        valuation_date=vdate,
+        source_name="EUR",
+    )
 
     df_date['maturity_days'] = df_date['maturity'].apply(maturity_to_days_EUR)
       #  convert maturity from x years and y months to days
@@ -94,6 +131,11 @@ def get_bundesbank_interest_rate(valuation_date, maturity_date):
 
     # find neighbours and interpolate linearly
     idx = np.searchsorted(x, target_days, side='left')
+    if idx <= 0:
+        return float(y[0])
+    if idx >= len(x):
+        return float(y[-1])
+
     left, right = idx - 1, idx
     x0, x1 = x[left], x[right]
     y0, y1 = y[left], y[right]
@@ -102,30 +144,44 @@ def get_bundesbank_interest_rate(valuation_date, maturity_date):
     t = (target_days - x0) / (x1 - x0)
     return float(y0 + t * (y1 - y0))
 
+def fetch_swiss_curve():
+    """
+    Lädt die Schweizer Zinskurve von der SNB (CSV) und gibt ein DataFrame zurück.
+    """
+    today = pd.Timestamp.today().strftime("%Y-%m-%d")
+    url = f"https://data.snb.ch/api/cube/rendeiduebd/data/csv/de?dimSel=D0(CHF),D1(1J,2J,3J,4J,5J,6J,7J,8J,9J,10J)&fromDate=2020-01-01&toDate={today}"
+    resp = requests.get(url)
+    resp.raise_for_status()
+    # SNB CSV enthält drei Metadatenzeilen vor der Kopfzeile.
+    df = pd.read_csv(StringIO(resp.text), sep=";", skiprows=3)
+    return df
+
 def get_foreign_rate(foreign_country_name, dataframe_foreign_1, dataframe_foreign_2, valuation_date, maturity_date):
     """
     """
+    
+    vdate = pd.to_datetime(valuation_date)
+    mdate = pd.to_datetime(maturity_date)
+    
     if foreign_country_name == "US Dollar":
         df_1 = pd.read_csv(dataframe_foreign_1)
         df_2 = pd.read_csv(dataframe_foreign_2)
         df = pd.concat([df_1, df_2], ignore_index=True)
         df['Date'] = pd.to_datetime(df['Date'])
 
-        vdate = pd.to_datetime(valuation_date)
-        mdate = pd.to_datetime(maturity_date)
+        # Use latest available row up to valuation date.
+        df_hist = df[df['Date'] <= vdate].copy()
+        df_hist = df_hist.iloc[np.argsort(df_hist['Date'].to_numpy())]
+        if df_hist.empty:
+            raise ValueError(f"No USD yield curve data on or before valuation date {valuation_date}")
 
-        # Use the selected valuation date row from the Treasury curve table.
-        df_date = df[df['Date'] == vdate]
-        if df_date.empty:
-            raise ValueError(f"No USD yield curve data for valuation date {valuation_date}")
-
-        row = df_date.iloc[0]
         points = []
         for col in df.columns:
             if col == 'Date':
                 continue
             days = maturity_to_days_USD(col)
-            obs = pd.to_numeric(row[col], errors='coerce')
+            obs_series = pd.to_numeric(df_hist[col], errors='coerce').ffill()
+            obs = obs_series.iloc[-1]
             if days is not None and pd.notna(obs):
                 points.append((days, obs / 100.0))
 
@@ -141,7 +197,42 @@ def get_foreign_rate(foreign_country_name, dataframe_foreign_1, dataframe_foreig
         return float(np.interp(target_days, x, y))
 
     elif foreign_country_name == "Schweizer Franken":
-        raise NotImplementedError("Die Zinsstrukturkurve für CHF ist noch nicht implementiert.")
+        df = fetch_swiss_curve().copy()
+        df_date = _latest_curve_snapshot(
+            df,
+            date_col="Date",
+            tenor_col="D1",
+            value_col="Value",
+            valuation_date=vdate,
+            source_name="CHF",
+        )
+
+        df_date["maturity_days"] = df_date["D1"].apply(maturity_to_days_CHF)
+        df_date["obs"] = df_date["Value"] / 100.0
+        df_date = df_date.dropna(subset=["maturity_days", "obs"])
+
+        if df_date.empty:
+            raise ValueError("No valid CHF maturity points found in SNB data")
+
+        target_days = int((mdate - vdate).days)
+
+        df_date = df_date.sort_values("maturity_days")
+        x = df_date["maturity_days"].to_numpy(dtype=float)
+        y = df_date["obs"].to_numpy(dtype=float)
+
+        idx = np.searchsorted(x, target_days, side="left")
+        if idx <= 0:
+            return float(y[0])
+        if idx >= len(x):
+            return float(y[-1])
+
+        left, right = idx - 1, idx
+        x0, x1 = x[left], x[right]
+        y0, y1 = y[left], y[right]
+        if x1 == x0:
+            return float(y0)
+        t = (target_days - x0) / (x1 - x0)
+        return float(y0 + t * (y1 - y0))
     elif foreign_country_name == "Britisches Pfund":
         raise NotImplementedError("Die Zinsstrukturkurve für GBP ist noch nicht implementiert.")
     else:

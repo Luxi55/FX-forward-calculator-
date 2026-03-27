@@ -40,15 +40,13 @@ if "input_data" in st.session_state:
     st.metric("Inländischer Zinssatz (EUR)", f"{dom_rate:.4%}")
     st.metric(f"Fremdwährungszinssatz ({foreign_country_name})", f"{foreign_rate:.4%}")
 
-    forward_rate = data["spot_rate"] * df_dom / df_for
+    forward_rate = data["spot_rate"] * (np.exp(df_dom * (maturity_date - valuation_date).days / 360) / np.exp(df_for * (maturity_date - valuation_date).days / 360))
     st.metric("Forward Rate", f"{forward_rate:.4f}")
 
-    # Nominalbetrag in Fremdwährung
+    # Nominalbetrag in Fremdwährungn
     bought_amount = data["nominal"] * data["contract_rate"]
     
-    # Marktwert = (F_aktuell - F_Kontrakt) × Nominal_FW × DF_Fremdwährung
-    # konvertiert in EUR-Basis
-    market_value = (forward_rate - data["contract_rate"]) * bought_amount * df_for / forward_rate
-    st.metric("Marktwert des Forwards (EUR)", f"{market_value:.2f}")
+    market_value_dom = (bought_amount/forward_rate - bought_amount) /(1 + dom_rate * (maturity_date - valuation_date).days / 360)
+    st.metric("Marktwert des Forwards (EUR)", f"{market_value_dom:.2f}")
 else:
     st.warning("Bitte zuerst Geschäftsdaten eingeben!")
