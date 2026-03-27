@@ -65,15 +65,24 @@ if st.session_state.foreign_country_name_fx == "US Dollar":
         help="Fuer US Dollar sind je nach Szenario 2 CSV noetig.",
         key="dataframe_foreign_2_fx"
     )
+elif st.session_state.foreign_country_name_fx == "Britisches Pfund":
+    dataframe_foreign_1 = st.file_uploader(
+        "Excel-Datei mit historischen Zinsdaten hochladen",
+        type=["xlsx", "xls"],
+        key="dataframe_foreign_1_fx"
+    )
+    dataframe_foreign_2 = st.file_uploader(
+        "Excel-Datei mit historischen Zinsdaten hochladen",
+        type=["xlsx", "xls"],
+        help="Fuer Britisches Pfund sind je nach Szenario 2 Excel-Dateien noetig.",
+        key="dataframe_foreign_2_fx"
+    )
 else:
     dataframe_foreign_1 = None
     dataframe_foreign_2 = None
 
 if st.session_state.foreign_country_name_fx == "Schweizer Franken":
     st.info("Zinsstrukturkurve fuer Schweizer Franken wird automatisch ueber API bezogen.")
-
-if st.session_state.foreign_country_name_fx == "Britisches Pfund":
-    st.warning("Britisches Pfund ist noch nicht implementiert.")
 
 if st.button("Berechnung vorbereiten", type="primary"):
     st.session_state.input_data = {

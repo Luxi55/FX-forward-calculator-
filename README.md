@@ -9,5 +9,7 @@ https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextV
 
 Datenquelle Schweiz Yield Curve: https://data.snb.ch/de/topics/ziredev/cube/rendeiduebd(sidebar:-/help_api/-)
 
+Datenquelle UK Yield Curve: https://www.bankofengland.co.uk/statistics/yield-curves unter archieve yield curve data.
+
 Befehl zum starten:
 streamlit run Home.py

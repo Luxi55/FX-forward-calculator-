@@ -156,6 +156,46 @@ def fetch_swiss_curve():
     df = pd.read_csv(StringIO(resp.text), sep=";", skiprows=3)
     return df
 
+
+def read_gbp_curve_excel(file_obj):
+    """
+    Read GBP curve from Excel (4th sheet).
+    Rows 1, 2, 4 and 5 are skipped. Row 3 contains month tenors.
+    """
+    raw = pd.read_excel(
+        file_obj,
+        sheet_name=3,
+        header=None,
+        skiprows=[0, 1, 3, 4],
+    )
+
+    if raw.empty or len(raw) < 2:
+        raise ValueError("GBP Excel data is empty or does not contain tenor/value rows")
+
+    tenor_row = raw.iloc[0]
+    data = raw.iloc[1:].copy()
+
+    # First column is expected to be the date column.
+    date_col = data.columns[0]
+    data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
+    data = data[data[date_col].notna()]
+
+    if data.empty:
+        raise ValueError("GBP Excel data does not contain valid dates")
+
+    wide = pd.DataFrame({"Date": data[date_col]})
+    for col in data.columns[1:]:
+        months = pd.to_numeric(tenor_row[col], errors="coerce")
+        if pd.isna(months):
+            continue
+        tenor_key = str(int(months))
+        wide[tenor_key] = pd.to_numeric(data[col], errors="coerce")
+
+    if len(wide.columns) <= 1:
+        raise ValueError("No valid GBP tenor columns found in Excel data")
+
+    return wide
+
 def get_foreign_rate(foreign_country_name, dataframe_foreign_1, dataframe_foreign_2, valuation_date, maturity_date):
     """
     """
@@ -164,9 +204,15 @@ def get_foreign_rate(foreign_country_name, dataframe_foreign_1, dataframe_foreig
     mdate = pd.to_datetime(maturity_date)
     
     if foreign_country_name == "US Dollar":
-        df_1 = pd.read_csv(dataframe_foreign_1)
-        df_2 = pd.read_csv(dataframe_foreign_2)
-        df = pd.concat([df_1, df_2], ignore_index=True)
+        usd_frames = []
+        if dataframe_foreign_1 is not None:
+            usd_frames.append(pd.read_csv(dataframe_foreign_1))
+        if dataframe_foreign_2 is not None:
+            usd_frames.append(pd.read_csv(dataframe_foreign_2))
+        if not usd_frames:
+            raise ValueError("Bitte mindestens eine USD-CSV-Datei hochladen.")
+
+        df = pd.concat(usd_frames, ignore_index=True)
         df['Date'] = pd.to_datetime(df['Date'])
 
         # Use latest available row up to valuation date.
@@ -234,7 +280,44 @@ def get_foreign_rate(foreign_country_name, dataframe_foreign_1, dataframe_foreig
         t = (target_days - x0) / (x1 - x0)
         return float(y0 + t * (y1 - y0))
     elif foreign_country_name == "Britisches Pfund":
-        raise NotImplementedError("Die Zinsstrukturkurve für GBP ist noch nicht implementiert.")
+        gbp_frames = []
+        if dataframe_foreign_1 is not None:
+            gbp_frames.append(read_gbp_curve_excel(dataframe_foreign_1))
+        if dataframe_foreign_2 is not None:
+            gbp_frames.append(read_gbp_curve_excel(dataframe_foreign_2))
+        if not gbp_frames:
+            raise ValueError("Bitte mindestens eine GBP-Excel-Datei hochladen.")
+
+        df = pd.concat(gbp_frames, ignore_index=True)
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+
+        df_hist = df[df["Date"] <= vdate].copy()
+        df_hist = df_hist.iloc[np.argsort(df_hist["Date"].to_numpy())]
+        if df_hist.empty:
+            raise ValueError(f"No GBP yield curve data on or before valuation date {valuation_date}")
+
+        points = []
+        for col in df.columns:
+            if col == "Date":
+                continue
+            months = pd.to_numeric(col, errors="coerce")
+            if pd.isna(months):
+                continue
+            days = int(float(months) * 30)
+            obs_series = pd.to_numeric(df_hist[col], errors="coerce").ffill()
+            obs = obs_series.iloc[-1]
+            if pd.notna(obs):
+                points.append((days, obs / 100.0))
+
+        if not points:
+            raise ValueError("No valid GBP maturity points found in input Excel")
+
+        points.sort(key=lambda p: p[0])
+        x = np.array([p[0] for p in points], dtype=float)
+        y = np.array([p[1] for p in points], dtype=float)
+
+        target_days = int((mdate - vdate).days)
+        return float(np.interp(target_days, x, y))
     else:
         raise ValueError(f"Unbekannte Partnerwährung: {foreign_country_name}")
 
